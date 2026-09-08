@@ -1,0 +1,54 @@
+# piz
+
+Startup picker for [pi](https://github.com/badlogic/pi-mono) packages, skills,
+and tools. Launches pi with a filtered config so you only pay the initial
+context for what you actually want loaded.
+
+Your real `~/.pi/agent/settings.json` is never modified — piz builds a
+throwaway config dir, symlinks everything except `settings.json` into it,
+writes a filtered `settings.json`, and execs pi with `PI_CODING_AGENT_DIR`
+pointing at it.
+
+## Install
+
+```bash
+alias piz=/home/jcallen/Development/piz/piz   # in .bashrc
+```
+
+or add `~/Development/piz` to your `PATH`.
+
+## Usage
+
+```bash
+piz                  # picker, then pi (last selection pre-checked)
+piz --no-prompt      # skip picker, reuse saved selection (also auto for non-TTY)
+piz --show           # print the filtered settings.json that would be used
+piz --selftest       # verify package resolution + filtering logic
+piz <pi args...>     # everything else passes through to pi
+```
+
+Picker keys: `↑/↓` move · `space` toggle · `x` expand/collapse a package ·
+`enter` done · `esc` cancel. After the package picker there is one
+optional free-text line: comma-separated tool names passed to pi as
+`--exclude-tools` (blank keeps the saved value).
+
+## Selection model
+
+- Each package from `packages` in settings.json is a row; toggling a package
+  toggles it and all its skills.
+- `x` expands a package to per-skill checkboxes (skills = dirs with a
+  `SKILL.md` under the `pi.skills` manifest dirs).
+- Fully selected packages stay as plain strings in the generated settings;
+  partially selected ones use pi's documented object form
+  `{"source": ..., "skills": [...]}`; deselected ones are dropped.
+
+Selection persists in `~/.pi/piz/state.json`.
+
+## Notes
+
+- The temp config dir lives in `$TMPDIR` and is cleaned by the OS; sessions,
+  auth, models, and installed packages are shared via symlinks.
+- Run `pi install` / `pi update` with plain `pi`, not `piz`.
+- Package resolution mirrors pi's: `npm:` → `~/.pi/agent/npm/node_modules/`,
+  `git:` → `~/.pi/agent/git/`, anything else is a path relative to
+  `~/.pi/agent` (or absolute).
