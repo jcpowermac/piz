@@ -44,6 +44,26 @@ optional free-text line: comma-separated tool names passed to pi as
 
 Selection persists in `~/.pi/piz/state.json`.
 
+## MicroVM mode
+
+```bash
+piz --podman [-p "prompt"]              # run pi in a krun microVM
+piz --podman --image IMG --runtime crun # override image / runtime
+```
+
+The image (built by GitHub Actions on push to main):
+`ghcr.io/jcpowermac/piz-pi` — pi + tools only (git jq make gcc g++ python3
+tree ripgrep gh). No packages live in the image: at launch piz copies
+`npm/`, `git/`, and `models.json` from your agent dir plus the filtered
+`settings.json` into a temp dir, and mounts it at `/pi/agent` with
+`PI_CODING_AGENT_DIR` pointing at it. Your workspace is mounted at
+`/workspace`. The VM shares the host network (so the local llama-server is
+reachable); sessions/auth/models-store are NOT shared — the VM initializes
+its own.
+
+Needs: `krun` (dnf install krun), `/dev/kvm` (user in the `kvm` group),
+and podman. Without KVM, retry with `--runtime crun` (no VM isolation).
+
 ## Notes
 
 - The temp config dir lives in `$TMPDIR` and is cleaned by the OS; sessions,

@@ -17,10 +17,25 @@ const AGENT_DIR =
   process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 const STATE_FILE = path.join(os.homedir(), ".pi", "piz", "state.json");
 
-const SELF_FLAGS = new Set(["--show", "--no-prompt", "--selftest"]);
+const SELF_FLAGS = new Set(["--show", "--no-prompt", "--selftest", "--podman"]);
 const argv = process.argv.slice(2);
-const flags = new Set(argv.filter((a) => a.startsWith("--")));
-const passthrough = argv.filter((a) => !SELF_FLAGS.has(a));
+
+// --image / --runtime take values; pull them out before passthrough so the
+// value (and the flag itself) never leak into the pi/podman args.
+function takeValue(args, name, def) {
+  let v = def;
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === name) v = args[++i];
+    else if (args[i].startsWith(name + "=")) v = args[i].slice(name.length + 1);
+    else rest.push(args[i]);
+  }
+  return [v, rest];
+}
+const [image, a1] = takeValue(argv, "--image", "ghcr.io/jcpowermac/piz-pi:latest");
+const [runtime, a2] = takeValue(a1, "--runtime", "krun");
+const flags = new Set(a2.filter((a) => a.startsWith("--")));
+const passthrough = a2.filter((a) => !SELF_FLAGS.has(a));
 
 // ---------- package discovery ----------
 
@@ -251,6 +266,22 @@ function makeConfigDir(settings) {
   return tmp;
 }
 
+// For the VM: real copies, not symlinks (krun can't deref symlinks outside
+// the mount) and not hardlinks (in-VM writes would hit host files via the
+// link; /tmp is tmpfs vs home btrfs so cross-device links are impossible).
+// Only npm/ + git/ are mounted in — sessions, auth.json, models stay out.
+function materializeDir(settings) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "piz-vm-"));
+  // npm/ + git/ are the package trees; models.json carries the provider
+  // definitions (baseUrl for llama-server etc.) that settings.json references.
+  for (const d of ["npm", "git", "models.json"]) {
+    const src = path.join(AGENT_DIR, d);
+    if (fs.existsSync(src)) fs.cpSync(src, path.join(tmp, d), { recursive: true });
+  }
+  fs.writeFileSync(path.join(tmp, "settings.json"), JSON.stringify(settings, null, 2));
+  return tmp;
+}
+
 function selftest(pkgs) {
   let fails = 0;
   const check = (cond, msg) => {
@@ -318,6 +349,27 @@ const filtered = { ...settings, packages: filteredPackages(state, pkgs) };
 if (flags.has("--show")) {
   console.log(JSON.stringify(filtered, null, 2));
   process.exit(0);
+}
+
+if (flags.has("--podman")) {
+  if (runtime === "krun" && !fs.existsSync("/dev/kvm")) {
+    console.error("piz: krun requires /dev/kvm — enable KVM or retry with --runtime crun");
+    process.exit(1);
+  }
+  const tmp = materializeDir(filtered);
+  console.error(`piz: vm config dir: ${tmp} (image: ${image}, runtime: ${runtime})`);
+  const args = [
+    "run", `--runtime=${runtime}`, "--network", "host", "--rm", "-it",
+    "-v", `${tmp}:/pi/agent:z`,
+    "-v", `${process.cwd()}:/workspace:z`,
+    "-e", "PI_CODING_AGENT_DIR=/pi/agent",
+    "-w", "/workspace",
+    image, "pi", ...passthrough,
+  ];
+  if (state.excludeTools.length) args.push("--exclude-tools", state.excludeTools.join(","));
+  const r = spawnSync("podman", args, { stdio: "inherit" });
+  fs.rmSync(tmp, { recursive: true, force: true });
+  process.exit(r.status ?? (r.error ? 1 : 0));
 }
 
 const tmp = makeConfigDir(filtered);
