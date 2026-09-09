@@ -90,18 +90,28 @@ function allSkillsOn(p, st) {
   return p.skills.every((sk) => st.skills[sk.name]);
 }
 
+// pi resolves relative package paths against the settings file they appear
+// in, and piz writes a temp settings file — so relative sources must be
+// absolutized here or they point nowhere.
+function resolvedSrc(p) {
+  return p.src.startsWith("npm:") || p.src.startsWith("git:") || path.isAbsolute(p.src)
+    ? p.src
+    : p.dir;
+}
+
 function filteredPackages(state, pkgs) {
   const out = [];
   for (const p of pkgs) {
     const st = state.packages[p.src];
     if (!st.enabled) continue;
+    const src = resolvedSrc(p);
     if (p.skills.length > 0 && !allSkillsOn(p, st)) {
       const sel = p.skills
         .filter((sk) => st.skills[sk.name])
         .map((sk) => sk.relPath);
-      out.push({ source: p.src, skills: sel });
+      out.push({ source: src, skills: sel });
     } else {
-      out.push(p.src);
+      out.push(src);
     }
   }
   return out;
@@ -264,9 +274,18 @@ function selftest(pkgs) {
   if (p2.skills.length > 1)
     state.packages[p2.src].skills[p2.skills[p2.skills.length - 1].name] = false;
   const filtered = filteredPackages(state, pkgs);
-  check(!filtered.some((e) => (e.source || e) === p1.src), "deselected package dropped");
+  check(
+    filtered.every((e) => {
+      const s = typeof e === "string" ? e : e.source;
+      return s.startsWith("npm:") || s.startsWith("git:") || path.isAbsolute(s);
+    }),
+    "all emitted sources are absolute or scheme-prefixed",
+  );
+  const p1Src = resolvedSrc(p1);
+  check(!filtered.some((e) => (e.source || e) === p1Src), "deselected package dropped");
   if (p2.skills.length > 1 && p1.src !== p2.src) {
-    const entry = filtered.find((e) => e.source === p2.src);
+    const p2Src = resolvedSrc(p2);
+    const entry = filtered.find((e) => (e.source || e) === p2Src);
     check(
       !!entry && Array.isArray(entry.skills) && entry.skills.length === p2.skills.length - 1,
       `partial package uses object form with ${p2.skills.length - 1} skills`,
