@@ -61,8 +61,15 @@ tree ripgrep gh). No packages live in the image: at launch piz copies
 reachable); sessions/auth/models-store are NOT shared — the VM initializes
 its own.
 
+`~/.ssh` is mounted read-only at `/root/.ssh` (where container-ssh
+resolves keys) and `$HOME/.ssh`, so git-over-SSH and `pi install git:`
+work. Host env vars (e.g. `GH_TOKEN`) pass through automatically — podman,
+unlike docker, inherits the caller's environment.
+
 Needs: `krun` (dnf install krun), `/dev/kvm` (user in the `kvm` group),
 and podman. Without KVM, retry with `--runtime crun` (no VM isolation).
+Note: krun's host-net mode doesn't forward the host's DNS stub, so piz
+passes `--dns 1.1.1.1`; reference tailnet services by IP, not hostname.
 
 ## Notes
 

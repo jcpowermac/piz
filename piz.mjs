@@ -360,12 +360,23 @@ if (flags.has("--podman")) {
   console.error(`piz: vm config dir: ${tmp} (image: ${image}, runtime: ${runtime})`);
   const args = [
     "run", `--runtime=${runtime}`, "--network", "host", "--rm", "-it",
+    // krun's host-net mode doesn't forward the host's systemd-resolved stub
+    // (127.0.0.53), so name resolution fails in-VM; point at a public
+    // resolver. Tailnet services must be referenced by IP (as in models.json).
+    "--dns", "1.1.1.1",
     "-v", `${tmp}:/pi/agent:z`,
     "-v", `${process.cwd()}:/workspace:z`,
     "-e", "PI_CODING_AGENT_DIR=/pi/agent",
     "-w", "/workspace",
-    image, "pi", ...passthrough,
   ];
+  // Host env (GH_TOKEN etc.) is inherited by podman automatically, but ssh
+  // keys live on disk: mount ~/.ssh read-only so git-over-ssh + gh work.
+  // Mount both /root/.ssh (ssh resolves keys from the passwd home of the
+  // container user, which is root) and $HOME/.ssh (tools that honor $HOME).
+  const ssh = path.join(os.homedir(), ".ssh");
+  if (fs.existsSync(ssh))
+    args.push("-v", `${ssh}:/root/.ssh:ro,z`, "-v", `${ssh}:${os.homedir()}/.ssh:ro,z`);
+  args.push(image, "pi", ...passthrough);
   if (state.excludeTools.length) args.push("--exclude-tools", state.excludeTools.join(","));
   const r = spawnSync("podman", args, { stdio: "inherit" });
   fs.rmSync(tmp, { recursive: true, force: true });
